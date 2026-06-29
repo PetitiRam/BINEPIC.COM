@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "JEDIDA Marketplace",
+    "slug": "jedida-marketplace",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "jedida",
+    "splash": {
+      "backgroundColor": "#FBF6EC"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": { "supportsTablet": true, "bundleIdentifier": "com.jedida.marketplace" },
+    "android": {
+      "package": "com.jedida.marketplace",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [{ "scheme": "https", "host": "jedidamarketplace.com" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
+    },
+    "extra": {
+      "apiBaseUrl": "http://localhost:5000/api"
+    }
+  }
+}
