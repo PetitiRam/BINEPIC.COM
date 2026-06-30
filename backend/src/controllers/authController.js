@@ -141,8 +141,9 @@ export async function verifyPhone(req, res) {
 // response time) to a wrong password — so signin can never succeed, and
 // can never even hint at success, for an unregistered email.
 export async function signin(req, res) {
-  const { email, password } = req.body;
-  if (!email || !password) {
+  const { email, password,phone,code } = req.body;
+                                          
+  if (!email || !password||!phone||!code) {
     return res.status(400).json({ error: 'Email and password are required.' });
   }
 

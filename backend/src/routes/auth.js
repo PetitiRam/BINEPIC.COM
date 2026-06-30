@@ -4,9 +4,12 @@ import {
   forgotPassword, resetPassword, verifyPhone, resendOtp, getMe
 } from '../controllers/authController.js';
 import { requireAuth } from '../middleware/auth.js';
+import { loginLimiter } from '../middleware/rateLimit.js';
+import { sendOtp } from '../controllers/otpController.js';
+import { verifyOtp } from '../controllers/otpController.js';
 
 const router = express.Router();
-
+                            
 router.post('/signup', signup);
 router.post('/signin', signin);
 router.post('/refresh', refresh);
@@ -16,5 +19,9 @@ router.post('/reset-password', resetPassword);
 router.post('/verify-phone', requireAuth, verifyPhone);
 router.post('/resend-otp', requireAuth, resendOtp);
 router.get('/me', requireAuth, getMe);
+router.post('/signin', loginLimiter, signin);
+router.post('/send-otp', sendOtp);
+router.post('/verify-otp', verifyOtp);
 
 export default router;
+
