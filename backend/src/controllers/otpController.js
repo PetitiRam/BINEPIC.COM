@@ -1,14 +1,17 @@
 import client from '../config/twilio.js';
 
+/**
+ * STEP 1: SEND OTP (Twilio)
+ */
 export async function sendOtp(req, res) {
   const { phone } = req.body;
 
   if (!phone) {
-    return res.status(400).json({ error: 'Phone number required' });
+    return res.status(400).json({ error: 'Phone number is required' });
   }
 
   try {
-    await client.verify.v2
+    const verification = await client.verify.v2
       .services(process.env.TWILIO_SERVICE_SID)
       .verifications.create({
         to: phone,
@@ -16,21 +19,27 @@ export async function sendOtp(req, res) {
       });
 
     return res.json({
-      message: 'OTP sent successfully'
+      success: true,
+      message: 'OTP sent successfully',
+      status: verification.status
     });
 
   } catch (err) {
-    console.error('OTP send error:', err);
+    console.error('Send OTP error:', err);
     return res.status(500).json({
       error: 'Failed to send OTP'
     });
   }
 }
+
+/**
+ * STEP 2: VERIFY OTP (Twilio)
+ */
 export async function verifyOtp(req, res) {
   const { phone, code } = req.body;
 
   if (!phone || !code) {
-    return res.status(400).json({ error: 'Phone and code required' });
+    return res.status(400).json({ error: 'Phone and code are required' });
   }
 
   try {
@@ -48,6 +57,7 @@ export async function verifyOtp(req, res) {
     }
 
     return res.json({
+      success: true,
       message: 'OTP verified successfully'
     });
 

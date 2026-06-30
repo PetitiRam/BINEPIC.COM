@@ -10,24 +10,9 @@ export default function SignIn() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState(1);
-const [phone, setPhone] = useState('');
 const [code, setCode] = useState('');
-const sendOtp = async () => {
-  setError('');
-  setLoading(true);
 
-  try {
-    const { data } = await client.post('/auth/send-otp', {
-      phone
-    });
 
-    setStep(2); // move to OTP step
-  } catch (err) {
-    setError(err.response?.data?.error || 'Failed to send OTP');
-  } finally {
-    setLoading(false);
-  }
-};
 
 const handleSubmit = async (e) => {
   e.preventDefault();
@@ -35,18 +20,41 @@ const handleSubmit = async (e) => {
   setLoading(true);
 
   try {
-    const { data } = await client.post('/auth/signin', {
-      email,
-      password,
-      phone,
-      code
-    });
+    // STEP 1: LOGIN REQUEST (EMAIL + PASSWORD)
+    if (step === 1) {
+      const { data } = await client.post('/auth/signin', {
+        email,
+        password
+      });
 
-    localStorage.setItem('jedida_access_token', data.accessToken);
-    localStorage.setItem('jedida_refresh_token', data.refreshToken);
-    localStorage.setItem('jedida_user', JSON.stringify(data.user));
+      // backend says OTP is required
+      if (data.requiresOtp) {
+        setStep(2);
+        return;
+      }
 
-    navigate('/marketplace');
+      // fallback (if backend ever logs in directly)
+      localStorage.setItem('jedida_access_token', data.accessToken);
+      localStorage.setItem('jedida_refresh_token', data.refreshToken);
+      localStorage.setItem('jedida_user', JSON.stringify(data.user));
+
+      navigate('/marketplace');
+      return;
+    }
+
+    // STEP 2: VERIFY OTP
+    if (step === 2) {
+      const { data } = await client.post('/auth/verify-signin-otp', {
+        email,
+        code
+      });
+
+      localStorage.setItem('jedida_access_token', data.accessToken);
+      localStorage.setItem('jedida_refresh_token', data.refreshToken);
+      localStorage.setItem('jedida_user', JSON.stringify(data.user));
+
+      navigate('/marketplace');
+    }
 
   } catch (err) {
     setError(err.response?.data?.error || 'Could not sign in. Please try again.');
@@ -54,7 +62,6 @@ const handleSubmit = async (e) => {
     setLoading(false);
   }
 };
-
   return (
     <AuthLayout>
       <div className="eyebrow">Welcome back</div>
@@ -88,25 +95,15 @@ const handleSubmit = async (e) => {
       />
     </div>
 
-    <div className="field-group">
-      <label htmlFor="phone">Phone number</label>
-      <input
-        id="phone"
-        type="tel"
-        placeholder="+2567XXXXXXXX"
-        value={phone}
-        onChange={(e) => setPhone(e.target.value)}
-        required
-      />
-    </div>
-
+                  
     <button
-      type="button"
+      type="submit"
       className="btn-primary"
-      onClick={sendOtp}
+      onClick={() => setStep(1)}
       disabled={loading}
     >
-      {loading ? 'Sending OTP…' : 'Send OTP'}
+                                           
+      {loading ? 'Sending OTP…' : 'Continue'}
     </button>
   </>
 )}

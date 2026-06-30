@@ -63,7 +63,10 @@ app.use('/api/site', publicPetitiRoutes);
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'JEDIDA Marketplace API', phase: 4 });
 });
-
+app.use((req, res, next) => {
+  console.log("REQUEST:", req.method, req.url);
+  next();
+});
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found.' });
 });

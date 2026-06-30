@@ -7,6 +7,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { loginLimiter } from '../middleware/rateLimit.js';
 import { sendOtp } from '../controllers/otpController.js';
 import { verifyOtp } from '../controllers/otpController.js';
+import { verifySigninOtp } from '../controllers/authController.js';
 
 const router = express.Router();
                             
@@ -22,6 +23,6 @@ router.get('/me', requireAuth, getMe);
 router.post('/signin', loginLimiter, signin);
 router.post('/send-otp', sendOtp);
 router.post('/verify-otp', verifyOtp);
-
+router.post('/verify-signin-otp', verifySigninOtp);
 export default router;
 

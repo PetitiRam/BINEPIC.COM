@@ -5,6 +5,8 @@ import cryptoRandomString from 'crypto-random-string';
 import { query } from '../config/db.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt.js';
 import { sendOtpSms, generateOtpCode } from '../utils/twilioClient.js';
+import { verifyOtp } from '../controllers/otpController.js';
+import client from '../config/twilio.js';
 
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
@@ -29,52 +31,83 @@ async function issueOtp(userId, phoneNumber) {
 export async function signup(req, res) {
   const { email, password, fullName, phoneNumber, locationCountry, locationCity } = req.body;
 
-  if (!email || !password || !fullName || !phoneNumber) {
-    return res.status(400).json({ error: 'Email, password, full name and phone number are required.' });
-  }
-  if (password.length < 8) {
-    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
-  }
-
-  const normalizedEmail = normalizeEmail(email);
-
-  try {
-    const existing = await query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
-    if (existing.rows.length > 0) {
-      return res.status(409).json({ error: 'An account with this email already exists. Please sign in instead.' });
-    }
-
-    const passwordHash = await bcrypt.hash(password, 12);
-
-    const result = await query(
-      `INSERT INTO users (email, password_hash, full_name, phone_number, location_country, location_city)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, email, full_name, phone_number, primary_role, is_admin, status, kyc_status, phone_verified, created_at`,
-      [normalizedEmail, passwordHash, fullName, phoneNumber, locationCountry || null, locationCity || null]
-    );
-
-    const user = result.rows[0];
-    const otpResult = await issueOtp(user.id, phoneNumber);
-
-    const accessToken = signAccessToken(user);
-    const refreshToken = signRefreshToken(user);
-    await query(
-      `INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '7 days')`,
-      [user.id, hashToken(refreshToken)]
-    );
-
-    return res.status(201).json({
-      message: otpResult.sandbox
-        ? 'Account created. Twilio is not configured yet, so check the backend console for your verification code.'
-        : 'Account created. Enter the verification code sent to your phone to activate buying.',
-      user, accessToken, refreshToken
-    });
-  } catch (err) {
-    console.error('Signup error:', err);
-    return res.status(500).json({ error: 'Could not create account. Please try again.' });
-  }
+if (!email || !password || !fullName || !phoneNumber) {
+  return res.status(400).json({ error: 'All fields are required.' });
 }
 
+if (password.length < 8) {
+  return res.status(400).json({ error: 'Password too short.' });
+}
+const normalizedEmail = normalizeEmail(email);
+const normalizedPhone = phoneNumber.trim();
+
+  try {
+const existing = await query(
+  `SELECT id FROM users WHERE email = $1 OR phone_number = $2`,
+  [normalizedEmail, normalizedPhone]
+);
+
+if (existing.rows.length > 0) {
+  return res.status(409).json({
+    error: 'Email or phone already exists.'
+  });
+}
+
+const passwordHash = await bcrypt.hash(password, 12);
+
+const result = await query(
+  `INSERT INTO users (
+    email,
+    password_hash,
+    full_name,
+    phone_number,
+    location_country,
+    location_city,
+    status,
+    phone_verified
+  )
+  VALUES ($1,$2,$3,$4,$5,$6,'pending',false)
+  RETURNING id, email, full_name, phone_number, status`,
+  [
+    normalizedEmail,
+    passwordHash,
+    fullName,
+    normalizedPhone,
+    locationCountry || null,
+    locationCity || null
+  ]
+);
+
+const user = result.rows[0];
+
+
+  // 2. Send OTP ONLY
+  const otpResult = await issueOtp(user.id, phoneNumber);
+
+  // 3. Return clean response (NO TOKENS)
+  return res.status(201).json({
+    message: otpResult?.sandbox
+      ? 'Account created. Check backend console for OTP.'
+      : 'Account created. OTP sent to your phone. Please verify to continue.',
+
+    user: {
+      id: user.id,
+      email: user.email,
+      fullName: user.full_name,
+      phoneNumber: user.phone_number,
+      status: user.status
+    },
+
+    requiresOtp: true
+  });
+
+} catch (err) {
+  console.error('Signup error:', err);
+  return res.status(500).json({
+    error: 'Could not create account. Please try again.'
+  });
+}
+}
 export async function resendOtp(req, res) {
   const userId = req.user?.id;
   if (!userId) return res.status(401).json({ error: 'Not authenticated.' });
@@ -141,60 +174,59 @@ export async function verifyPhone(req, res) {
 // response time) to a wrong password — so signin can never succeed, and
 // can never even hint at success, for an unregistered email.
 export async function signin(req, res) {
-  const { email, password,phone,code } = req.body;
-                                          
-  if (!email || !password||!phone||!code) {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required.' });
   }
 
   const normalizedEmail = normalizeEmail(email);
-  const genericError = { error: 'Incorrect email or password.' };
 
   try {
     const result = await query(
-      `SELECT id, email, password_hash, full_name, phone_number, primary_role, is_admin, status, kyc_status, phone_verified
+      `SELECT id, email, password_hash, phone_number, status
        FROM users WHERE email = $1`,
       [normalizedEmail]
     );
+
     const user = result.rows[0];
 
-    // Explicit existence guard — this is the actual "no sign-in without
-    // registration" enforcement. Still run bcrypt against a dummy hash so
-    // an attacker can't distinguish "no account" from "wrong password" by
-    // timing the response.
     if (!user) {
       await bcrypt.compare(password, DUMMY_HASH);
-      return res.status(401).json(genericError);
+      return res.status(401).json({ error: 'Incorrect email or password.' });
     }
 
     const valid = await bcrypt.compare(password, user.password_hash);
+
     if (!valid) {
-      return res.status(401).json(genericError);
+      return res.status(401).json({ error: 'Incorrect email or password.' });
     }
 
     if (user.status === 'suspended') {
-      return res.status(403).json({ error: 'Your account has been suspended. Contact support.' });
+      return res.status(403).json({ error: 'Account suspended.' });
     }
+
     if (user.status === 'rejected') {
-      return res.status(403).json({ error: 'This account is not active. Contact support.' });
+      return res.status(403).json({ error: 'Account not active.' });
     }
 
-    delete user.password_hash;
+    if (!user.phone_number) {
+      return res.status(403).json({ error: 'Phone number required.' });
+    }
 
-    const accessToken = signAccessToken(user);
-    const refreshToken = signRefreshToken(user);
-    await query(
-      `INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '7 days')`,
-      [user.id, hashToken(refreshToken)]
-    );
+    // 🔥 ONLY OTP HERE
+    await issueOtp(user.id, user.phone_number);
 
-    return res.json({ message: 'Signed in successfully.', user, accessToken, refreshToken });
+    return res.json({
+      requiresOtp: true,
+      message: 'OTP sent successfully'
+    });
+
   } catch (err) {
-    console.error('Signin error:', err);
-    return res.status(500).json({ error: 'Could not sign in. Please try again.' });
+    console.error(err);
+    return res.status(500).json({ error: 'Signin failed' });
   }
 }
-
 export async function refresh(req, res) {
   const { refreshToken } = req.body;
   if (!refreshToken) return res.status(400).json({ error: 'Refresh token is required.' });
@@ -264,7 +296,18 @@ export async function forgotPassword(req, res) {
     return res.status(500).json({ error: 'Could not process request. Please try again.' });
   }
 }
+export async function checkEmail(req, res) {
+  const email = normalizeEmail(req.query.email);
 
+  const result = await query(
+    `SELECT id FROM users WHERE email = $1`,
+    [email]
+  );
+
+  return res.json({
+    exists: result.rows.length > 0
+  });
+}
 export async function resetPassword(req, res) {
   const { uid, token, newPassword } = req.body;
   if (!uid || !token || !newPassword) {
@@ -310,5 +353,69 @@ export async function getMe(req, res) {
   } catch (err) {
     console.error('Get me error:', err);
     return res.status(500).json({ error: 'Could not load profile.' });
+  }
+}
+export async function verifySigninOtp(req, res) {
+  const { email, code } = req.body;
+
+  if (!email || !code) {
+    return res.status(400).json({ error: 'Email and code required' });
+  }
+
+  try {
+    // 1. Find user
+    const result = await query(
+      `SELECT id, email, phone_number, status
+       FROM users WHERE email = $1`,
+      [normalizeEmail(email)]
+    );
+
+    const user = result.rows[0];
+
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid request' });
+    }
+
+    // 2. VERIFY OTP DIRECTLY (NO SERVICE LAYER)
+    const check = await client.verify.v2
+      .services(process.env.TWILIO_SERVICE_SID)
+      .verificationChecks.create({
+        to: user.phone_number,
+        code
+      });
+
+    if (check.status !== 'approved') {
+      return res.status(400).json({ error: 'Invalid or expired OTP' });
+    }
+
+    // 3. check status
+    if (user.status === 'suspended') {
+      return res.status(403).json({ error: 'Account suspended' });
+    }
+
+    if (user.status === 'rejected') {
+      return res.status(403).json({ error: 'Account not active' });
+    }
+
+    // 4. issue tokens
+    const accessToken = signAccessToken(user);
+    const refreshToken = signRefreshToken(user);
+
+    await query(
+      `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+       VALUES ($1, $2, now() + interval '7 days')`,
+      [user.id, hashToken(refreshToken)]
+    );
+
+    return res.json({
+      message: 'Login successful',
+      user,
+      accessToken,
+      refreshToken
+    });
+
+  } catch (err) {
+    console.error('verifySigninOtp error:', err);
+    return res.status(500).json({ error: 'Failed to verify OTP' });
   }
 }
