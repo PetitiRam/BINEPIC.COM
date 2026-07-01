@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
+dotenv.config();
 
 import authRoutes from './routes/auth.js';
 import upgradeRoutes from './routes/upgrade.js';
@@ -22,6 +23,8 @@ import deliveryRoutes from './routes/deliveryRoutes.js';
 import petitiRoutes from '../ai/petiti/petitiRoutes.js';
 import tausiRoutes from '../ai/tausi/tausiRoutes.js';
 import publicPetitiRoutes from './routes/publicPetiti.js';
+console.log('ACCESS SECRET LOADED:', !!process.env.JWT_ACCESS_SECRET);
+console.log('REFRESH SECRET LOADED:', !!process.env.JWT_REFRESH_SECRET);
 
 dotenv.config();
 
